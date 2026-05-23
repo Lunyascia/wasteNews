@@ -44,18 +44,27 @@ async def get_news_list(
 
 @router.get("/detail")
 async def get_news_detail(news_id: int = Query(default=1, alias="newsId"), db: AsyncSession = Depends(get_db)):
+    # 获取新闻详情 + 浏览量+1 + 相关新闻
+    news_detail = await news.get_news_detail(db, news_id)
+    if not news_detail:
+        return {
+            "code": 404,
+            "message": "新闻不存在",
+            "data": None
+        }
+
     return {
         "code": 200,
         "message": "success",
         "data": {
-            "id": 1,
-            "title":"新闻标题",
-    "content":"新闻内容",
-    "image": "null",
-    "author": "null",
-    "publishTime": "2023-01-01T00:00:00",
-    "categoryId": 1,
-    "views": 1,
+            "id": news_detail,
+            "title":news_detail.title,
+    "content":news_detail.content,
+    "image": news_detail.image,
+    "author":news_detail.author,
+    "publishTime": news_detail.publish_time,
+    "categoryId": news_detail.category_id,
+    "views": news_detail.views,
     "relatedNews": []
     }
          }

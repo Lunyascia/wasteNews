@@ -20,4 +20,9 @@ async def get_news_count(db:AsyncSession,category_id: int):
     result = await db.execute(stat)
     return result.scalar()
 
+async def get_news_detail(db:AsyncSession,news_id: int):
+    stat = select(News).where(News.id == news_id)
+    result = await db.execute(stat)
+    return result.scalar_one_or_none()
+
 
