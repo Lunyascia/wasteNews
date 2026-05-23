@@ -5,7 +5,6 @@ from config.db_conf import get_db
 from crud import news
 
 
-
 router = APIRouter( prefix="/api/news", tags=["news"])
 
 @router.get("/categories")
@@ -52,6 +51,8 @@ async def get_news_detail(news_id: int = Query(default=1, alias="newsId"), db: A
             "message": "新闻不存在",
             "data": None
         }
+
+    await news.increase_news_views(db, news_detail.id)
 
     return {
         "code": 200,

@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy import func
 from models.news import Category,News
-
+from sqlalchemy import update
 
 
 async def get_categories(db:AsyncSession,skip: int = 0, limit: int = 100):
@@ -24,5 +24,10 @@ async def get_news_detail(db:AsyncSession,news_id: int):
     stat = select(News).where(News.id == news_id)
     result = await db.execute(stat)
     return result.scalar_one_or_none()
+
+async def increase_news_views(db:AsyncSession,news_id: int):
+    stat = update(News).where(News.id == news_id).values(views=News.views+1)
+    await db.execute(stat)
+    await db.commit()
 
 
