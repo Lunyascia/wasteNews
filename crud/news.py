@@ -27,7 +27,10 @@ async def get_news_detail(db:AsyncSession,news_id: int):
 
 async def increase_news_views(db:AsyncSession,news_id: int):
     stat = update(News).where(News.id == news_id).values(views=News.views+1)
-    await db.execute(stat)
+    result = await db.execute(stat)
     await db.commit()
+
+    return  result.rowcount > 0
+
 
 

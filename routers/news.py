@@ -1,3 +1,5 @@
+from http.client import HTTPException
+
 from fastapi import APIRouter,Depends,Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,7 +54,10 @@ async def get_news_detail(news_id: int = Query(default=1, alias="newsId"), db: A
             "data": None
         }
 
-    await news.increase_news_views(db, news_detail.id)
+    views_res = await news.increase_news_views(db, news_detail.id)
+    if not views_res:
+        raise HTTPException(status_code=404, detail="更新浏览量失败")
+
 
     return {
         "code": 200,
