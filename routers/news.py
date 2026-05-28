@@ -1,5 +1,5 @@
 from http.client import HTTPException
-
+from fastapi import HTTPException
 from fastapi import APIRouter,Depends,Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +59,8 @@ async def get_news_detail(news_id: int = Query(default=1, alias="newsId"), db: A
         raise HTTPException(status_code=404, detail="更新浏览量失败")
 
 
+    related_news = await news.get_related_news(db, news_detail.id, news_detail.category_id)
+
     return {
         "code": 200,
         "message": "success",
@@ -71,6 +73,6 @@ async def get_news_detail(news_id: int = Query(default=1, alias="newsId"), db: A
     "publishTime": news_detail.publish_time,
     "categoryId": news_detail.category_id,
     "views": news_detail.views,
-    "relatedNews": []
+    "relatedNews":related_news
     }
          }
