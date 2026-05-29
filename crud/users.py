@@ -18,15 +18,14 @@ async def create_user(db: AsyncSession, user_data: UserRequest):
     user = User(
         username=user_data.username,
         password=hash_password,
-        nickname=user_data.nickname,
-        phone=user_data.phone
     )
 
     # 3. 添加到会话并提交
     db.add(user)
-    await db.commit()
+    await db.flush()
+
 
     # 4. 【关键步骤】刷新对象，确保 ID 和默认字段同步到内存中
     await db.refresh(user)
-
+    await db.commit()
     return user
