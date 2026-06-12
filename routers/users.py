@@ -21,7 +21,7 @@ async def register (user_data:UserRequest,db: AsyncSession = Depends (get_db),):
             "message": "注册成功",
             "data": {
             "token":token,
-            "userinfo": {
+            "userInfo": {
             "id": user.id,
             "username": user.username,
             "bio":user.bio,
