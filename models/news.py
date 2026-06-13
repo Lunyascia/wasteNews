@@ -4,10 +4,10 @@ from typing import Optional
 from sqlalchemy import ForeignKey, Text
 from sqlalchemy import Index
 from sqlalchemy import DateTime
-from sqlalchemy.orm import declarative_base, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Integer, String
 
-Base = declarative_base()
+from models.users import Base
 
 
 class Category(Base):
