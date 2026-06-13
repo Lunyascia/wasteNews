@@ -2,10 +2,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, HTTPException
 from starlette import status
 from config.db_conf import get_db
-from crud.users import get_user_by_username, create_user,create_token
+from crud.users import get_user_by_username, create_user, create_token, authenticate_user
 from schemas.users import UserRequest
 
 router = APIRouter ( prefix = "/api/user" , tags = [ "users" ])
+
+@router.post("/login")
+async def login(user_data: UserRequest, db: AsyncSession = Depends(get_db)):
+    user = await authenticate_user(db, user_data.username, user_data.password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或密码错误")
+
+    token = await create_token(db, user.id)
+    return {
+        "code": 200,
+        "message": "登录成功",
+        "data": {
+            "token": token,
+            "userInfo": {
+                "id": user.id,
+                "username": user.username,
+                "bio": user.bio,
+                "avatar": user.avatar,
+            }
+        }
+    }
+
 
 @router.post ("/register")
 async def register (user_data:UserRequest,db: AsyncSession = Depends (get_db),):

@@ -33,7 +33,17 @@ async def create_user(db: AsyncSession, user_data: UserRequest):
     await db.commit()
     return user
 
-async def create_token(db: AsyncSession,user_id: int):
+async def authenticate_user(db: AsyncSession, username: str, password: str):
+    """验证用户名密码，成功返回 user，失败返回 None"""
+    user = await get_user_by_username(db, username)
+    if not user:
+        return None
+    if not security.verify_password(password, user.password):
+        return None
+    return user
+
+
+async def create_token(db: AsyncSession, user_id: int):
     token = str(uuid.uuid4())
     expires_at = datetime.now() + timedelta(days=7)
     query = select(UserToken).where(UserToken.user_id == user_id)
