@@ -39,7 +39,7 @@ async def get_related_news(db:AsyncSession,news_id: int,category_id: int,limit: 
     result = await db.execute(stat)
     related_news = result.scalars().all()
     return [{
-         "id": news_detail,
+         "id": news_detail.id,
             "title":news_detail.title,
     "content":news_detail.content,
     "image": news_detail.image,

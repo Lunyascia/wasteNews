@@ -65,7 +65,7 @@ async def get_news_detail(news_id: int = Query(default=1, alias="newsId"), db: A
         "code": 200,
         "message": "success",
         "data": {
-            "id": news_detail,
+            "id": news_detail.id,
             "title":news_detail.title,
     "content":news_detail.content,
     "image": news_detail.image,
