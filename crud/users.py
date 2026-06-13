@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timedelta
+from fastapi import Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -62,3 +63,45 @@ async def create_token(db: AsyncSession, user_id: int):
         await db.commit()
 
     return token
+
+
+async def get_user_by_id(db: AsyncSession, user_id: int):
+    query = select(User).where(User.id == user_id)
+    result = await db.execute(query)
+    return result.scalar()
+
+
+async def get_current_user(
+    db: AsyncSession,
+    authorization: str = Header(default=""),
+):
+    """从 Authorization header 提取 token 并返回当前用户"""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="未提供认证信息")
+
+    token = authorization.strip()
+    query = select(UserToken).where(UserToken.token == token)
+    result = await db.execute(query)
+    user_token = result.scalar_one_or_none()
+
+    if not user_token:
+        raise HTTPException(status_code=401, detail="无效的认证信息")
+    if user_token.expires_at < datetime.now():
+        raise HTTPException(status_code=401, detail="认证信息已过期")
+
+    user = await get_user_by_id(db, user_token.user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+    return user
+
+
+async def update_user_bio(db: AsyncSession, user: User, bio: str):
+    user.bio = bio
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def update_user_password(db: AsyncSession, user: User, new_password: str):
+    user.password = security.get_hash_password(new_password)
+    await db.commit()
