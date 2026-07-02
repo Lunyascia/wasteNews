@@ -50,6 +50,7 @@ async def create_token(db: AsyncSession, user_id: int):
     query = select(UserToken).where(UserToken.user_id == user_id)
     result = await db.execute(query)
     user_token = result.scalar_one_or_none()
+    old_token = user_token.token if user_token else None
     if user_token:
         user_token.token = token
         user_token.expires_at = expires_at
@@ -60,7 +61,31 @@ async def create_token(db: AsyncSession, user_id: int):
             expires_at=expires_at
         )
         db.add(user_token)
-        await db.commit()
+
+    # 删除旧 Token 的 Redis 缓存
+    if old_token:
+        try:
+            from services.cache import remove_cached_token
+            await remove_cached_token(old_token)
+        except Exception:
+            pass
+
+    await db.commit()
+
+    # 缓存新 Token → 用户信息到 Redis
+    try:
+        from services.cache import set_cached_token_user
+        user = await get_user_by_id(db, user_id)
+        if user:
+            await set_cached_token_user(token, {
+                "id": user.id,
+                "username": user.username,
+                "bio": user.bio,
+                "avatar": user.avatar,
+                "nickname": user.nickname,
+            })
+    except Exception:
+        pass
 
     return token
 
@@ -75,11 +100,24 @@ async def get_current_user(
     db: AsyncSession,
     authorization: str = Header(default=""),
 ):
-    """从 Authorization header 提取 token 并返回当前用户"""
+    """从 Authorization header 提取 token 并返回当前用户（Redis 优先）"""
     if not authorization:
         raise HTTPException(status_code=401, detail="未提供认证信息")
 
     token = authorization.strip()
+
+    # 1. 优先查 Redis 缓存
+    try:
+        from services.cache import get_cached_token_user
+        cached_user = await get_cached_token_user(token)
+        if cached_user:
+            user = await get_user_by_id(db, cached_user["id"])
+            if user:
+                return user
+    except Exception:
+        pass  # Redis 不可用时降级到数据库
+
+    # 2. Redis 未命中，查数据库
     query = select(UserToken).where(UserToken.token == token)
     result = await db.execute(query)
     user_token = result.scalar_one_or_none()
@@ -92,6 +130,20 @@ async def get_current_user(
     user = await get_user_by_id(db, user_token.user_id)
     if not user:
         raise HTTPException(status_code=401, detail="用户不存在")
+
+    # 3. 写回 Redis 缓存
+    try:
+        from services.cache import set_cached_token_user
+        await set_cached_token_user(token, {
+            "id": user.id,
+            "username": user.username,
+            "bio": user.bio,
+            "avatar": user.avatar,
+            "nickname": user.nickname,
+        })
+    except Exception:
+        pass
+
     return user
 
 

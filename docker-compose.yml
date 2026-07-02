@@ -1,0 +1,109 @@
+# ============================================================
+# wasteNews Docker Compose 编排
+# 服务: MySQL 8.0 + Redis + FastAPI 后端 + Nginx 前端
+#
+# 前置条件:
+#   1. 安装 Docker Desktop + WSL2
+#   2. 前端源码放在 ./frontend/ 目录下 (或通过 FRONTEND_PATH 环境变量指定)
+#
+# 启动:
+#   docker compose up -d
+#   docker compose logs -f backend   # 查看后端日志
+#   docker compose logs -f frontend  # 查看前端日志
+#
+# 停止:
+#   docker compose down
+# ============================================================
+services:
+  # ======================== MySQL 数据库 ========================
+  db:
+    image: mysql:8.0
+    container_name: wastenews-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-news_app}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+
+  # ======================== Redis 缓存 ========================
+  redis:
+    image: redis:7-alpine
+    container_name: wastenews-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-network
+
+  # ======================== FastAPI 后端 ========================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: wastenews-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      DB_NAME: ${MYSQL_DATABASE:-news_app}
+      REDIS_URL: redis://redis:6379/0
+      NEWS_FETCH_INTERVAL: ${NEWS_FETCH_INTERVAL:-30}
+      NEWS_TOTAL_COUNT: ${NEWS_TOTAL_COUNT:-300}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # ======================== Nginx 前端 ========================
+  frontend:
+    build:
+      context: ${FRONTEND_PATH:-./frontend}
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: wastenews-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

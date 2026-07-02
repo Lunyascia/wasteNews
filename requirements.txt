@@ -5,3 +5,7 @@ SQLAlchemy==2.0.50
 aiomysql==0.2.0
 bcrypt==4.0.1
 uvicorn==0.34.0
+apscheduler==3.10.4
+feedparser==6.0.11
+requests==2.32.4
+redis[hiredis]==5.2.1

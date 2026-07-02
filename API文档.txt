@@ -1,0 +1,564 @@
+================================================================================
+                    wasteNews 新闻资讯平台 — 项目接口文档
+================================================================================
+                        更新日期：2026-06-21
+
+================================================================================
+一、项目概述（简历可用）
+================================================================================
+
+  独立设计并开发了一个全栈新闻资讯平台，采用 FastAPI + Vue3 技术栈，实现
+  了用户认证、新闻分类浏览、收藏/历史记录、AI 智能问答等核心功能模块。
+  后端基于 FastAPI 异步框架 + SQLAlchemy ORM + MySQL + Redis 多层缓存
+  架构，实现了 RESTful API 接口设计与 Token 认证机制；前端采用 Vue3
+  Composition API + Vant4 移动端组件库，支持中英文国际化。项目通过
+  Docker Compose 实现容器化部署（MySQL + Redis + FastAPI + Nginx），
+  引入 Redis 作为缓存中间件，实现了新闻接口缓存加速、Token 快速鉴权、
+  浏览量异步批量入库等性能优化。集成 APScheduler 定时任务与 RSS 多源
+  新闻自动抓取，数据库恒定维持 300 条新闻并每 30 分钟自动全量刷新，
+  刷新后自动失效 Redis 缓存，实现了新闻数据的高性能在线更新。
+
+================================================================================
+二、技术栈
+================================================================================
+
+  【后端】
+  - 框架：        FastAPI 0.136.3 (异步 Web 框架)
+  - ORM：         SQLAlchemy 2.0.50 (异步模式)
+  - 数据库驱动：  aiomysql 0.2.0 (MySQL 异步驱动)
+  - 数据库：      MySQL 8.0
+  - 缓存：        Redis 7 (redis[hiredis] 5.2.1，异步客户端)
+  - 密码加密：    passlib 1.7.4 + bcrypt 4.0.1
+  - 数据校验：    Pydantic 2.13.4
+  - 服务器：      uvicorn 0.34.0
+  - 定时任务：    APScheduler 3.10.4
+  - RSS 解析：    feedparser 6.0.11
+  - HTTP 请求：   requests 2.32.4
+
+  【前端】
+  - 框架：        Vue 3 (Composition API, <script setup>)
+  - 构建工具：    Vite 7
+  - UI 组件库：   Vant 4.9.21 (移动端)
+  - 状态管理：    Pinia 3 + pinia-plugin-persistedstate (持久化)
+  - 路由：        Vue Router 4
+  - HTTP 客户端： Axios
+  - 国际化：      vue-i18n 9.8.0 (中文/英文)
+  - Markdown：    marked + DOMPurify
+
+  【部署与运维】
+  - 容器化：      Docker + Docker Compose (4 个服务编排)
+  - 反向代理：    Nginx (前端静态服务 + /api 反向代理)
+  - 消息中间件：  Redis 7 (缓存 + Token 加速 + 浏览量计数)
+  - 系统：        Windows 11 + WSL2 + Docker Desktop
+
+================================================================================
+三、项目目录结构
+================================================================================
+
+  wasteNews/
+  ├── main.py                  # FastAPI 应用入口 + lifespan 事件
+  │                            #   (Redis 初始化 + 新闻调度器 + 浏览量定时入库)
+  ├── requirements.txt         # Python 依赖
+  ├── init_db.py               # 数据库初始化脚本（建表 + 分类 + 测试用户）
+  ├── docker-compose.yml       # Docker 四服务编排文件
+  ├── Dockerfile.backend       # 后端镜像构建文件
+  ├── docker-entrypoint.sh     # 容器启动脚本（等 MySQL → 建表 → 启动）
+  ├── .env / .env.example      # 环境变量配置
+  │
+  ├── config/
+  │   ├── db_conf.py           # 数据库连接配置（异步引擎 + 会话工厂）
+  │   └── redis_conf.py        # Redis 连接配置（异步客户端 + 连接池）
+  │
+  ├── models/                  # 数据模型层（ORM 映射）
+  │   ├── users.py             #   User（用户表）+ UserToken（令牌表）
+  │   ├── news.py              #   Category（分类表）+ News（新闻表）
+  │   ├── favorite.py          #   Favorite（收藏表）
+  │   └── history.py           #   History（浏览历史表）
+  │
+  ├── schemas/                 # Pydantic 请求/响应模型
+  │   └── users.py             #   UserRequest / BioUpdate / PasswordUpdate
+  │
+  ├── crud/                    # 数据访问层（数据库 CRUD 操作）
+  │   ├── users.py             #   用户：注册、登录、Token（Redis 缓存）、鉴权
+  │   ├── news.py              #   新闻：分类列表、列表、详情、浏览量
+  │   ├── favorite.py          #   收藏：添加、删除、清空、检查、分页
+  │   └── history.py           #   历史：添加、删除、清空、列表
+  │
+  ├── routers/                 # 路由层（API 端点定义 + Redis 缓存读写）
+  │   ├── users.py             #   /api/user/*      用户认证与信息管理
+  │   ├── news.py              #   /api/news/*      新闻接口（Redis 缓存优先）
+  │   ├── favorite.py          #   /api/favorite/*  收藏功能接口
+  │   └── history.py           #   /api/history/*   浏览历史接口
+  │
+  ├── services/                # 业务服务层
+  │   ├── news_fetcher.py      #   RSS 新闻抓取 + APScheduler 定时调度
+  │   │                        #   (刷新后自动调用 cache.invalidate_news_cache)
+  │   └── cache.py             #   Redis 缓存工具层
+  │                            #   - 新闻列表/详情缓存 (TTL 5-10分钟)
+  │                            #   - Token 缓存 (TTL 7天)
+  │                            #   - 浏览量批量计数器 (Redis Hash)
+  │                            #   - 缓存失效/清空方法
+  │
+  └── utils/
+      └── security.py          # 密码哈希/验证工具（bcrypt）
+
+================================================================================
+四、数据库表结构
+================================================================================
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ 表名: user         说明: 用户信息表                                   │
+  ├────────────┬───────────────┬──────────────────────────────────────────┤
+  │ 字段       │ 类型          │ 说明                                     │
+  ├────────────┼───────────────┼──────────────────────────────────────────┤
+  │ id         │ INT (PK)      │ 用户ID，自增                             │
+  │ username   │ VARCHAR(50)   │ 用户名，唯一索引                         │
+  │ password   │ VARCHAR(255)  │ 密码（bcrypt 加密存储）                  │
+  │ nickname   │ VARCHAR(50)   │ 昵称                                     │
+  │ avatar     │ VARCHAR(255)  │ 头像URL，有默认值                        │
+  │ gender     │ ENUM          │ 性别：male/female/unknown，默认 unknown  │
+  │ bio        │ VARCHAR(500)  │ 个人简介，默认"简介"                     │
+  │ phone      │ VARCHAR(20)   │ 手机号，唯一索引                         │
+  │ created_at │ DATETIME      │ 创建时间                                 │
+  │ updated_at │ DATETIME      │ 更新时间（自动更新）                     │
+  └────────────┴───────────────┴──────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ 表名: user_token    说明: 用户认证令牌表（Redis 同步缓存）            │
+  ├────────────┬───────────────┬──────────────────────────────────────────┤
+  │ 字段       │ 类型          │ 说明                                     │
+  ├────────────┼───────────────┼──────────────────────────────────────────┤
+  │ id         │ INT (PK)      │ 令牌ID，自增                             │
+  │ user_id    │ INT (FK)      │ 关联 user.id                            │
+  │ token      │ VARCHAR(255)  │ UUID v4 令牌值，唯一索引                 │
+  │ expires_at │ DATETIME      │ 过期时间（创建后 7 天）                  │
+  │ created_at │ DATETIME      │ 创建时间                                 │
+  └────────────┴───────────────┴──────────────────────────────────────────┘
+  同步缓存：Redis key = token:user:{token}，TTL 与数据库一致 (7天)
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ 表名: news_category  说明: 新闻分类表（Redis 缓存 1 小时）            │
+  ├────────────┬───────────────┬──────────────────────────────────────────┤
+  │ 字段       │ 类型          │ 说明                                     │
+  ├────────────┼───────────────┼──────────────────────────────────────────┤
+  │ id         │ INT (PK)      │ 分类ID，自增                             │
+  │ name       │ VARCHAR(50)   │ 分类名称，唯一（头条/社会/国内/国际等）  │
+  │ sort_order │ INT           │ 排序权重                                 │
+  │ created_at │ DATETIME      │ 创建时间                                 │
+  │ updated_at │ DATETIME      │ 更新时间                                 │
+  └────────────┴───────────────┴──────────────────────────────────────────┘
+  内置 9 个分类：头条(1)、社会(2)、国内(3)、国际(4)、娱乐(5)、体育(6)、
+  军事(7)、科技(8)、财经(9)
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ 表名: news          说明: 新闻内容表（Redis 缓存详情 10 分钟）        │
+  ├────────────┬───────────────┬──────────────────────────────────────────┤
+  │ 字段       │ 类型          │ 说明                                     │
+  ├────────────┼───────────────┼──────────────────────────────────────────┤
+  │ id         │ INT (PK)      │ 新闻ID，自增                             │
+  │ title      │ VARCHAR(255)  │ 新闻标题                                 │
+  │ description│ VARCHAR(500)  │ 新闻摘要                                 │
+  │ content    │ TEXT          │ 新闻正文                                 │
+  │ image      │ VARCHAR(255)  │ 封面图片URL                              │
+  │ author     │ VARCHAR(50)   │ 作者/来源                                │
+  │ category_id│ INT (FK)      │ 关联 news_category.id                   │
+  │ views      │ INT           │ 浏览量（Redis 累加，每 5 分钟入库）      │
+  │ publish_time│ DATETIME     │ 发布时间                                 │
+  └────────────┴───────────────┴──────────────────────────────────────────┘
+  索引：fk_news_category_idx + idx_publish_time
+  缓存：Redis key = news:detail:{id} (TTL 10min) / news:list:{cid}:{p}:{s} (TTL 5min)
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ 表名: favorite     说明: 用户收藏关联表                                │
+  ├────────────┬───────────────┬──────────────────────────────────────────┤
+  │ 字段       │ 类型          │ 说明                                     │
+  ├────────────┼───────────────┼──────────────────────────────────────────┤
+  │ id         │ INT (PK)      │ 收藏ID，自增                             │
+  │ user_id    │ INT (FK)      │ 关联 user.id                            │
+  │ news_id    │ INT (FK)      │ 关联 news.id                            │
+  │ created_at │ DATETIME      │ 收藏时间                                 │
+  └────────────┴───────────────┴──────────────────────────────────────────┘
+  唯一约束：user_id + news_id 联合唯一
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ 表名: history      说明: 用户浏览历史表                                │
+  ├────────────┬───────────────┬──────────────────────────────────────────┤
+  │ 字段       │ 类型          │ 说明                                     │
+  ├────────────┼───────────────┼──────────────────────────────────────────┤
+  │ id         │ INT (PK)      │ 历史ID，自增                             │
+  │ user_id    │ INT (FK)      │ 关联 user.id                            │
+  │ news_id    │ INT (FK)      │ 关联 news.id                            │
+  │ view_time  │ DATETIME      │ 浏览时间（重复浏览会更新）               │
+  └────────────┴───────────────┴──────────────────────────────────────────┘
+  唯一约束：user_id + news_id 联合唯一
+
+================================================================================
+五、Redis 缓存架构
+================================================================================
+
+  项目引入 Redis 作为缓存中间件，解决以下三个性能瓶颈：
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │ 缓存策略总览                                                         │
+  ├──────────────┬──────────────┬───────────────┬───────────────────────┤
+  │ 缓存项       │ Redis Key    │ TTL           │ 失效触发              │
+  ├──────────────┼──────────────┼───────────────┼───────────────────────┤
+  │ 新闻列表     │ news:list:   │ 5 分钟        │ 新闻刷新后主动清空     │
+  │              │ {cid}:{p}:{s}│               │                       │
+  │ 新闻详情     │ news:detail: │ 10 分钟       │ 新闻刷新后主动清空     │
+  │              │ {id}         │               │                       │
+  │ 分类列表     │ news:        │ 1 小时        │ 自然过期               │
+  │              │ categories:* │               │                       │
+  │ Token→用户   │ token:user:  │ 7 天          │ 重新登录时覆盖         │
+  │              │ {token}      │               │                       │
+  │ 浏览量计数   │ news:views:  │ 持久 (Hash)   │ 每 5 分钟批量入库后清除 │
+  │              │ batch        │               │                       │
+  └──────────────┴──────────────┴───────────────┴───────────────────────┘
+
+  【缓存读写流程】
+
+    客户端请求
+        │
+        ▼
+    ┌──────────────┐
+    │ 1.查 Redis   │──命中──→ 直接返回 (毫秒级)
+    └──────┬───────┘
+           │ 未命中
+           ▼
+    ┌──────────────┐
+    │ 2.查 MySQL   │
+    └──────┬───────┘
+           │
+           ▼
+    ┌──────────────┐
+    │ 3.写回 Redis │──→ 返回客户端
+    └──────────────┘
+
+  【Token 鉴权加速】
+
+    旧流程：每次请求 → 查 user_token 表 (SQL) → 验证过期 → 查 user 表 (SQL)
+    新流程：每次请求 → 查 Redis (token:user:{token}) → 命中则返回
+            Redis 未命中 → 查数据库 → 写回 Redis（下次命中）
+
+  【浏览量异步批量入库】
+
+    旧流程：每次阅读 → UPDATE news SET views = views + 1（高并发下数据库压力大）
+    新流程：每次阅读 → Redis HSET news:views:batch {news_id} +1（内存操作）
+            每 5 分钟 → 批量汇总写入 MySQL → 清空 Redis 计数器
+    优势：数据库写入次数从 N 次/5分钟 降为 1 次/5分钟
+
+  【新闻刷新缓存失效】
+
+    新闻拉取完成后自动调用 cache.invalidate_news_cache()：
+    - 删除所有 news:list:* 键
+    - 删除所有 news:detail:* 键
+    下次请求自动重建缓存（查最新数据 → 写回 Redis）
+
+================================================================================
+六、API 接口详细说明
+================================================================================
+
+  所有接口统一响应格式：
+  {
+    "code": 200,        // 状态码（200=成功，401=未认证，404=不存在）
+    "message": "...",   // 提示信息
+    "data": { ... }     // 业务数据
+  }
+
+  认证方式：Header 中携带 Authorization 字段，值为 Token 字符串。
+  Token 鉴权优先查 Redis 缓存（key = token:user:{token}），未命中再查数据库。
+
+--------------------------------------------------------------------------------
+6.1  用户模块  /api/user
+--------------------------------------------------------------------------------
+
+  (1) POST /api/user/register    注册账号
+      请求体：  { "username": "xxx", "password": "xxx" }
+      响应：    data.token        登录令牌
+                data.userInfo     用户信息（id, username, bio, avatar）
+      说明：    注册成功后自动返回 Token，同时写入 Redis 缓存 (TTL 7天)，
+               前端直接进入登录态。
+      数据流：  router → crud.get_user_by_username（查重）
+                      → crud.create_user（bcrypt 加密 → INSERT user）
+                      → crud.create_token（生成 UUID Token → INSERT user_token
+                        → 旧 Token 从 Redis 删除 → 新 Token 写入 Redis）
+                      → 返回 token + userInfo
+      涉及文件：routers/users.py → crud/users.py → utils/security.py
+                                  → services/cache.py (Redis)
+
+  (2) POST /api/user/login       登录账号
+      请求体：  { "username": "xxx", "password": "xxx" }
+      响应：    data.token        登录令牌
+                data.userInfo     用户信息
+      说明：    验证用户名密码后生成新 Token，旧 Token 的 Redis 缓存被清除，
+               新 Token 写入 Redis。
+      数据流：  router → crud.authenticate_user（查用户 + bcrypt 验证）
+                      → crud.create_token（覆盖 Token → Redis 缓存）
+      涉及文件：同注册
+
+  (3) GET /api/user/info         获取当前用户信息
+      请求头：  Authorization: <token>
+      响应：    data.id / username / bio / avatar / nickname / gender / phone
+      说明：    Token 鉴权：先查 Redis (token:user:{token}) → 命中直接拿用户
+               → 未命中查 user_token 表 → 写回 Redis。
+      数据流：  router → crud.get_current_user（Redis 优先 → DB 兜底）
+      涉及文件：routers/users.py → crud/users.py → services/cache.py
+
+  (4) PUT /api/user/update       更新个人简介
+      请求头：  Authorization: <token>
+      请求体：  { "bio": "新的简介内容" }
+      响应：    data.id / username / bio / avatar（更新后）
+      说明：    仅支持更新 bio 字段。
+      数据流：  router → crud.get_current_user（鉴权，Redis 优先）
+                      → crud.update_user_bio（UPDATE user.bio）
+      涉及文件：routers/users.py → crud/users.py → schemas/users.py
+
+  (5) PUT /api/user/password     修改密码
+      请求头：  Authorization: <token>
+      请求体：  { "oldPassword": "旧密码", "newPassword": "新密码" }
+      响应：    data: null
+      说明：    先验证旧密码，通过后 bcrypt 加密新密码入库。
+      数据流：  router → crud.get_current_user（鉴权）
+                      → utils/security.verify_password（验证旧密码）
+                      → crud.update_user_password（加密 + UPDATE）
+      涉及文件：routers/users.py → crud/users.py → utils/security.py
+
+--------------------------------------------------------------------------------
+6.2  新闻模块  /api/news
+--------------------------------------------------------------------------------
+
+  (6) GET /api/news/categories   获取新闻分类列表
+      查询参数：skip  (默认 0)
+               limit (默认 100)
+      响应：    data: [ { id, name, sortOrder }, ... ]
+      说明：    优先查 Redis 缓存 (TTL 1小时)，未命中查库并写回缓存。
+      数据流：  router → Redis GET news:categories:*（命中直接返回）
+                      → 未命中 → crud.get_categories → 写回 Redis
+      涉及文件：routers/news.py → crud/news.py → services/cache.py
+
+  (7) GET /api/news/list         获取新闻列表（按分类分页，Redis 缓存）
+      查询参数：categoryId (默认 1)   分类ID
+               page       (默认 1)   页码
+               pageSize   (默认 10)  每页条数（最大 100）
+      响应：    data.list    新闻列表数组
+                data.total   该分类新闻总数
+                data.hasMore 是否还有更多（前端无限滚动用）
+      说明：    优先查 Redis (key = news:list:{cid}:{page}:{pageSize})，
+               TTL 5 分钟。缓存命中直接返回，毫秒级响应。
+      数据流：  router → Redis GET（命中则返回）
+                      → 未命中 → crud.get_news_list + crud.get_news_count
+                      → 写回 Redis → 返回
+      涉及文件：routers/news.py → crud/news.py → services/cache.py
+
+  (8) GET /api/news/detail       获取新闻详情（Redis 缓存 + 浏览量累加器）
+      查询参数：newsId (默认 1)    新闻ID
+      响应：    data.id / title / content / image / author /
+               publishTime / categoryId / views /
+               relatedNews: [ ... ]   相关新闻（同分类 TOP5）
+      说明：    优先查 Redis (key = news:detail:{id})，TTL 10 分钟。
+               浏览量不再直接 UPDATE 数据库，而是 Redis HINCRBY 累加，
+               每 5 分钟批量入库。relatedNews 排除当前新闻自身。
+      数据流：  router → Redis GET news:detail:{id}（命中 + incr 浏览量）
+                      → 未命中 → crud.get_news_detail → crud.get_related_news
+                      → Redis INCR 浏览量 → 写回 Redis → 返回
+      涉及文件：routers/news.py → crud/news.py → services/cache.py
+
+--------------------------------------------------------------------------------
+6.3  收藏模块  /api/favorite
+--------------------------------------------------------------------------------
+
+  所有收藏接口均需登录态（Token 鉴权走 Redis 优先）。
+
+  (9)  GET /api/favorite/check   检查是否已收藏
+      查询参数：newsId            新闻ID
+      响应：    data.isFavorite   true/false
+      数据流：  router → crud.get_current_user → crud.check_favorite
+      涉及文件：routers/favorite.py → crud/favorite.py
+
+  (10) POST /api/favorite/add    添加收藏
+      请求体：  { "newsId": 123 }
+      响应：    data: null
+      数据流：  router → crud.get_current_user → crud.add_favorite (INSERT)
+      涉及文件：routers/favorite.py → crud/favorite.py
+
+  (11) DELETE /api/favorite/remove  取消收藏
+      查询参数：newsId            新闻ID
+      响应：    data: null
+      数据流：  router → crud.get_current_user → crud.remove_favorite (DELETE)
+      涉及文件：routers/favorite.py → crud/favorite.py
+
+  (12) DELETE /api/favorite/clear   清空收藏
+      响应：    data: null
+      数据流：  router → crud.get_current_user → crud.clear_favorites (DELETE all)
+      涉及文件：routers/favorite.py → crud/favorite.py
+
+  (13) GET /api/favorite/list    获取收藏列表（分页）
+      查询参数：page (默认 1) / pageSize (默认 10)
+      响应：    data.list / total / hasMore
+      说明：    按收藏时间倒序，JOIN news 表。
+      数据流：  router → crud.get_current_user → crud.get_favorite_list + count
+      涉及文件：routers/favorite.py → crud/favorite.py → models/favorite.py, news.py
+
+--------------------------------------------------------------------------------
+6.4  历史记录模块  /api/history
+--------------------------------------------------------------------------------
+
+  所有历史接口均需登录态。
+
+  (14) POST /api/history/add     添加/更新浏览历史
+      请求体：  { "newsId": 123 }
+      响应：    data: null
+      说明：    同用户+同新闻 → UPDATE view_time；否则 INSERT。
+      数据流：  router → crud.get_current_user → crud.add_history
+      涉及文件：routers/history.py → crud/history.py
+
+  (15) GET /api/history/list     获取浏览历史列表
+      响应：    data.list [ {id, title, image, author, publishTime,
+                             categoryId, views, viewTime}, ... ]
+      说明：    JOIN news 表，按浏览时间倒序。
+      数据流：  router → crud.get_current_user → crud.get_history_list
+      涉及文件：routers/history.py → crud/history.py
+
+  (16) DELETE /api/history/delete/{news_id}  删除单条历史
+      路径参数：news_id
+      响应：    data: null
+      涉及文件：routers/history.py → crud/history.py
+
+  (17) DELETE /api/history/clear      清空所有历史
+      响应：    data: null
+      涉及文件：routers/history.py → crud/history.py
+
+================================================================================
+七、认证与鉴权流程（含 Redis 优化）
+================================================================================
+
+  1. 注册/登录 → 后端生成 UUID v4 Token，有效期 7 天
+  2. Token 存入 user_token 表 + 同步写入 Redis (key=token:user:{token})
+  3. 前端将 Token 存储于 Pinia → localStorage 持久化
+  4. 每次请求携带 Authorization: <token>
+  5. 鉴权流程：
+     ┌─ 1. Redis GET token:user:{token}
+     │    命中 → 直接拿 user_id → 查 user 表 → 返回
+     │    未命中 ↓
+     ├─ 2. MySQL SELECT user_token WHERE token=?
+     │    找到 → 验证过期 → 查 user → 写回 Redis → 返回
+     │    未找到 ↓
+     └─ 3. 返回 401 未认证
+
+================================================================================
+八、数据流架构（四层分离 + 缓存层）
+================================================================================
+
+  请求 →  routers/         ← 路由层：API 端点，参数校验，响应组装
+           │                  ★ 新闻接口：先查 Redis 缓存，命中直接返回
+           │
+           ├── 调用 services/cache.py  ← 缓存层：Redis 读写/失效管理
+           │
+           ├── 调用 crud/  ← 数据访问层：所有数据库 CRUD 操作
+           │       │
+           │       └── 使用 models/  ← 模型层：ORM 表映射
+           │              │
+           │              └── 操作 MySQL
+           │
+           └── 使用 schemas/  ← 校验层：Pydantic 请求体校验
+                 utils/       ← 工具层：bcrypt 密码哈希
+
+  设计原则：
+  - routers/ 只负责 HTTP 层逻辑（参数、响应格式、异常处理）+ 缓存判断
+  - services/cache.py 只负责 Redis 操作（GET/SET/DELETE/INCR）
+  - crud/ 只负责数据库操作
+  - models/ 只负责表结构
+  - 各层通过函数调用解耦，不跨层直接访问
+
+================================================================================
+九、新闻自动更新系统
+================================================================================
+
+  【调度方式】
+  - APScheduler (BackgroundScheduler)，在 FastAPI lifespan 中注册
+  - 首次启动：独立线程延迟 3 秒执行，不受容器时区影响
+  - 定时任务：每 30 分钟执行（NEWS_FETCH_INTERVAL 可配置）
+  - 浏览量定时入库：每 5 分钟批量写入 MySQL
+
+  【拉取逻辑】(services/news_fetcher.py)
+  1. RSS 多源拉取：12+ 个中文主流 RSS，按 9 分类配置
+     - 头条：新华网、人民网
+     - 社会：人民网社会、澎湃新闻
+     - 国内：新华网国内、人民网时政
+     - 国际：新华网国际、人民网国际
+     - 娱乐：人民网娱乐
+     - 体育：人民网体育
+     - 军事：人民网军事
+     - 科技：36氪、Solidot、少数派
+     - 财经：财联社、人民网财经
+  2. RSS 不足时从内置 495 条中文标题池随机补充
+  3. 9 分类均分：300÷9=33余3 → 6个分类34条 + 3个分类33条
+  4. 全量替换：DELETE 旧新闻 → 批量 INSERT 新新闻（事务性）
+  5. 发布时间在最近 24 小时内均匀错开
+  6. ★ 替换完成后自动调用 cache.invalidate_news_cache() 清空 Redis 缓存
+
+  【环境变量】
+  - NEWS_TOTAL_COUNT：新闻总量（默认 300）
+  - NEWS_FETCH_INTERVAL：拉取间隔分钟（默认 30）
+  - REDIS_URL：Redis 连接地址（默认 redis://redis:6379/0）
+
+================================================================================
+十、Docker 部署架构（四个容器）
+================================================================================
+
+  docker-compose.yml 编排四个服务：
+
+  ┌──────────────────────────────────────────────────────┐
+  │  frontend (Nginx :80 → 宿主机 :8080)                 │
+  │  - Vue3 静态文件服务                                  │
+  │  - /api/* 反向代理到 backend:8000                     │
+  │  - SPA try_files 路由支持                             │
+  │  - 多阶段构建: Node build → Nginx serve              │
+  ├──────────────────────────────────────────────────────┤
+  │  backend (uvicorn :8000)                             │
+  │  - FastAPI 异步服务                                   │
+  │  - Redis 连接池 (max 20 connections)                  │
+  │  - APScheduler × 2：                                  │
+  │    ① 新闻拉取（30分钟）② 浏览量入库（5分钟）          │
+  │  - 启动时等待 MySQL + Redis 就绪                      │
+  │  - Dockerfile: python:3.13-slim                      │
+  ├──────────────────────────────────────────────────────┤
+  │  redis (Redis 7-alpine :6379)                        │
+  │  - 最大内存 128MB，LRU 淘汰策略                       │
+  │  - AOF 持久化（数据不丢失）                           │
+  │  - 健康检查：redis-cli ping                           │
+  ├──────────────────────────────────────────────────────┤
+  │  db (MySQL 8.0 :3306)                                │
+  │  - Docker Volume 持久化                               │
+  │  - utf8mb4 字符集                                     │
+  │  - 健康检查：mysqladmin ping                          │
+  └──────────────────────────────────────────────────────┘
+
+  启动命令：  docker compose up -d
+  访问地址：  http://localhost:8080
+  测试账号：  admin / 123456
+
+================================================================================
+十一、前端路由与页面
+================================================================================
+
+  /                 首页 (Home)       分类Tab + 列表 + 下拉刷新
+  /news/detail/:id  新闻详情          正文 + 相关推荐（可点击跳转）+ 收藏
+  /category         分类页            指定分类列表
+  /login            登录页
+  /register         注册页
+  /my               个人中心
+  /profile          个人资料编辑
+  /settings         设置（主题/语言）
+  /favorite         我的收藏
+  /history          浏览历史
+  /aichat           AI 智能问答       (通义千问大模型)
+
+================================================================================
+十二、测试账号
+================================================================================
+
+  用户名：admin
+  密码：  123456
+
+================================================================================
