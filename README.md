@@ -1,4 +1,4 @@
-# 🗞️ wasteNews — 新闻资讯平台
+# 🗞️ 新闻脉动 — 全栈新闻资讯平台
 
 全栈新闻资讯应用，后端 **FastAPI + MySQL + Redis**，前端 **Vue 3 + Vant 4**，Docker Compose 一键部署。
 
@@ -14,6 +14,7 @@
 - **RSS 自动抓取** — APScheduler 定时从多 RSS 源拉取新闻，数据库恒定维持 300 条，每 30 分钟全量刷新
 - **Redis 缓存加速** — 新闻分类/列表/详情缓存、Token 快速鉴权、浏览量 Redis 计数器 + 每 5 分钟批量入库
 - **国际化** — 中 / 英文切换（vue-i18n）
+- **AI 智能对话** — 接入阿里通义千问大模型，SSE 流式传输实时对话（前端集成）
 - **Docker 一键部署** — MySQL + Redis + FastAPI + Nginx 四容器编排，`docker compose up -d` 即用
 
 ---
@@ -33,6 +34,7 @@
 | **UI 组件** | Vant 4 (移动端) |
 | **状态管理** | Pinia 3 + 持久化插件 |
 | **国际化** | vue-i18n |
+| **AI 大模型** | 阿里 DashScope（通义千问）+ SSE 流式 |
 | **部署** | Docker + Docker Compose + Nginx |
 
 ---
