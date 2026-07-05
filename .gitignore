@@ -29,3 +29,4 @@ frontend/
 
 # Claude
 CLAUDE.md
+.claude/
